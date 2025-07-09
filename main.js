@@ -178,7 +178,14 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
       });
       
       let progress = 0;
-      const driveSize = await getDriveSize(drive);
+      let driveSize = 0;
+      
+      // Get drive size asynchronously
+      getDriveSize(drive).then(size => {
+        driveSize = size;
+      }).catch(() => {
+        driveSize = 0;
+      });
       
       const progressInterval = setInterval(() => {
         progress = Math.min(progress + 10, 90);
@@ -188,7 +195,7 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
         const elapsed = now - passStartTime;
         const progressBytes = (progress / 100) * driveSize;
         
-        if (progress > 10 && elapsed > 5000) { // Wait 5 seconds for stable reading
+        if (progress > 10 && elapsed > 5000 && driveSize > 0) { // Wait 5 seconds for stable reading
           currentWriteSpeed = progressBytes / (elapsed / 1000); // bytes per second
           const remainingBytes = driveSize - progressBytes;
           const passTimeRemaining = remainingBytes / currentWriteSpeed * 1000; // ms
