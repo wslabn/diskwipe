@@ -30,6 +30,8 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/*.exe
+        files: |
+          dist/*.exe
+          dist/latest.yml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
