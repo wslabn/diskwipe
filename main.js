@@ -150,15 +150,16 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
         progress: 0
       });
 
-      // Use diskpart for reliable disk operations
-      let cmd;
+      // Create diskpart script file for reliable execution
+      let scriptContent;
       if (currentPass < 3) {
-        // Secure wipe passes - use diskpart clean all for complete wipe
-        cmd = `(echo select disk ${drive} & echo clean all & echo exit) | diskpart`;
+        scriptContent = `select disk ${drive}\nclean all\nexit\n`;
       } else {
-        // Final format with chosen filesystem
-        cmd = `(echo select disk ${drive} & echo create partition primary & echo active & echo format fs=${filesystem.toLowerCase()} quick & echo assign & echo exit) | diskpart`;
+        scriptContent = `select disk ${drive}\ncreate partition primary\nactive\nformat fs=${filesystem.toLowerCase()} quick\nassign\nexit\n`;
       }
+      
+      const scriptPath = createDiskpartScript(drive, currentPass, scriptContent);
+      const cmd = `diskpart /s "${scriptPath}"`;
       const process = spawn('cmd', ['/c', cmd], { shell: true });
       
       process.stdout.on('data', (data) => {
@@ -283,6 +284,12 @@ autoUpdater.on('error', (error) => {
   log(`Auto-updater error: ${error.message}`);
   mainWindow.webContents.send('update-status', { status: 'error', message: 'Update check failed' });
 });
+
+function createDiskpartScript(diskIndex, pass, content) {
+  const scriptPath = path.join(os.tmpdir(), `diskpart_${diskIndex}_${pass}.txt`);
+  fs.writeFileSync(scriptPath, content);
+  return scriptPath;
+}
 
 function createWipeScript(diskIndex, pass) {
   const scriptPath = path.join(os.tmpdir(), `wipe_${diskIndex}_${pass}.txt`);

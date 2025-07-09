@@ -1,12 +1,12 @@
 {
   "name": "diskwipe",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Secure disk wiping utility",
   "main": "main.js",
   "requestedExecutionLevel": "requireAdministrator",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder",
+    "build": "electron-builder --publish=always",
     "dist": "electron-builder --publish=never",
     "deploy": "electron-builder --publish=always"
   },
