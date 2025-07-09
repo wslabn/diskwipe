@@ -1,0 +1,43 @@
+{
+  "name": "diskwipe",
+  "version": "1.0.0",
+  "description": "Secure disk wiping utility",
+  "main": "main.js",
+  "requestedExecutionLevel": "requireAdministrator",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dist": "electron-builder --publish=never",
+    "deploy": "electron-builder --publish=always"
+  },
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4",
+    "electron-updater": "^6.1.0"
+  },
+  "build": {
+    "appId": "com.diskwipe.app",
+    "productName": "DiskWipe",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "style.css"
+    ],
+    "win": {
+      "requestedExecutionLevel": "requireAdministrator",
+      "target": "nsis"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "wslabn",
+      "repo": "diskwipe",
+      "private": true,
+      "token": "${GH_TOKEN}"
+    }
+  }
+}

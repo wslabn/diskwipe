@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>DiskWipe - Secure Drive Wiper</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="theme-toggle">
+        <button id="themeBtn">🌙 Dark Mode</button>
+    </div>
+    
+    <div class="container">
+        <h1>🔒 DiskWipe</h1>
+        <p class="subtitle">Secure Drive Wiping Utility</p>
+        
+        <div class="warning-box">
+            ⚠️ <strong>WARNING:</strong> This tool will permanently destroy all data on selected drives.
+        </div>
+
+        <div class="section">
+            <h2>Available Drives</h2>
+            <button id="refreshBtn">🔄 Refresh Drives</button>
+            <div id="driveList"></div>
+        </div>
+
+        <div class="section">
+            <button id="wipeBtn" disabled>🗑️ Wipe Selected Drives</button>
+        </div>
+
+        <div id="progressModal" class="modal hidden">
+            <div class="modal-content">
+                <h3>🔒 Secure Disk Wiping</h3>
+                <div id="progressInfo"></div>
+                <div class="progress-bar">
+                    <div id="progressFill"></div>
+                </div>
+                <div id="progressDetails"></div>
+                <div class="warning">⚠️ Do not power off or disconnect drives during this process</div>
+            </div>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

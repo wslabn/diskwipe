@@ -1,0 +1,3 @@
+select disk Disk 7  
+clean  
+exit  
