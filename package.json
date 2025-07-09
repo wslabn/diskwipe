@@ -10,10 +10,12 @@
     "dist": "electron-builder --publish=never",
     "deploy": "electron-builder --publish=always"
   },
+  "dependencies": {
+    "electron-updater": "^6.1.0"
+  },
   "devDependencies": {
     "electron": "^27.0.0",
-    "electron-builder": "^24.6.4",
-    "electron-updater": "^6.1.0"
+    "electron-builder": "^24.6.4"
   },
   "build": {
     "appId": "com.diskwipe.app",
