@@ -5,6 +5,20 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Setup logging
+const logPath = path.join(os.homedir(), 'DiskWipe', 'logs');
+if (!fs.existsSync(logPath)) {
+  fs.mkdirSync(logPath, { recursive: true });
+}
+const logFile = path.join(logPath, `diskwipe-${new Date().toISOString().split('T')[0]}.log`);
+
+function log(message) {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] ${message}\n`;
+  console.log(message);
+  fs.appendFileSync(logFile, logEntry);
+}
+
 let mainWindow;
 let isWiping = false;
 
@@ -113,10 +127,10 @@ ipcMain.handle('get-drives', async () => {
 // Secure wipe drive using cipher command
 ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
   return new Promise((resolve, reject) => {
-    console.log('Received drive parameter:', driveLetter);
+    log(`Received drive parameter: ${driveLetter}`);
     // Extract just the number from "Disk 7" format
     const drive = driveLetter.replace('Disk ', '').replace(':', '');
-    console.log('Processed drive parameter:', drive);
+    log(`Processed drive parameter: ${drive}`);
     const passes = 4; // 3 cipher passes + 1 format
     let currentPass = 0;
 
@@ -147,11 +161,11 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
       const process = spawn('cmd', ['/c', cmd], { shell: true });
       
       process.stdout.on('data', (data) => {
-        console.log('stdout:', data.toString());
+        log(`stdout: ${data.toString().trim()}`);
       });
       
       process.stderr.on('data', (data) => {
-        console.log('stderr:', data.toString());
+        log(`stderr: ${data.toString().trim()}`);
       });
       
       let progress = 0;
