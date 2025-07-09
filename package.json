@@ -1,6 +1,6 @@
 {
   "name": "diskwipe",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Secure disk wiping utility",
   "main": "main.js",
   "requestedExecutionLevel": "requireAdministrator",
@@ -39,8 +39,6 @@
       "include": "uninstaller.nsh",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerHeaderIcon": "icon.png",
-      "uninstallerIcon": "icon.png",
       "allowToChangeInstallationDirectory": true,
       "oneClick": false,
       "perMachine": true
