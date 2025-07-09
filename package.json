@@ -35,9 +35,7 @@
     "publish": {
       "provider": "github",
       "owner": "wslabn",
-      "repo": "diskwipe",
-      "private": true,
-      "token": "${GH_TOKEN}"
+      "repo": "diskwipe"
     }
   }
 }
