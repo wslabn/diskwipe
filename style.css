@@ -71,6 +71,16 @@ body.dark .version {
     color: #777;
 }
 
+.time-estimate {
+    color: #888;
+    font-size: 11px;
+    font-style: italic;
+}
+
+body.dark .time-estimate {
+    color: #999;
+}
+
 .warning-box {
     background: #fff3cd;
     border: 1px solid #ffeaa7;

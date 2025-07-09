@@ -134,6 +134,11 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
     log(`Processed drive parameter: ${drive}`);
     const passes = 4; // 3 cipher passes + 1 format
     let currentPass = 0;
+    let passStartTime = Date.now();
+    let totalStartTime = Date.now();
+    let bytesWritten = 0;
+    let lastProgressTime = Date.now();
+    let currentWriteSpeed = 0;
 
     isWiping = true;
     
@@ -144,10 +149,12 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
         return;
       }
 
+      passStartTime = Date.now();
       event.sender.send('wipe-progress', {
         pass: currentPass + 1,
         totalPasses: passes,
-        progress: 0
+        progress: 0,
+        timeRemaining: null
       });
 
       // Create diskpart script file for reliable execution
@@ -171,13 +178,39 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
       });
       
       let progress = 0;
+      const driveSize = await getDriveSize(drive);
+      
       const progressInterval = setInterval(() => {
         progress = Math.min(progress + 10, 90);
-        event.sender.send('wipe-progress', {
-          pass: currentPass + 1,
-          totalPasses: passes,
-          progress
-        });
+        
+        // Calculate actual write speed and time estimates
+        const now = Date.now();
+        const elapsed = now - passStartTime;
+        const progressBytes = (progress / 100) * driveSize;
+        
+        if (progress > 10 && elapsed > 5000) { // Wait 5 seconds for stable reading
+          currentWriteSpeed = progressBytes / (elapsed / 1000); // bytes per second
+          const remainingBytes = driveSize - progressBytes;
+          const passTimeRemaining = remainingBytes / currentWriteSpeed * 1000; // ms
+          const remainingPasses = passes - currentPass - 1;
+          const totalTimeRemaining = passTimeRemaining + (remainingPasses * (driveSize / currentWriteSpeed * 1000));
+          
+          event.sender.send('wipe-progress', {
+            pass: currentPass + 1,
+            totalPasses: passes,
+            progress,
+            timeRemaining: totalTimeRemaining,
+            writeSpeed: currentWriteSpeed
+          });
+        } else {
+          event.sender.send('wipe-progress', {
+            pass: currentPass + 1,
+            totalPasses: passes,
+            progress,
+            timeRemaining: null,
+            writeSpeed: null
+          });
+        }
       }, 2000);
 
       process.on('close', (code) => {
@@ -187,7 +220,9 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
           event.sender.send('wipe-progress', {
             pass: currentPass + 1,
             totalPasses: passes,
-            progress: 100
+            progress: 100,
+            timeRemaining: null,
+            writeSpeed: currentWriteSpeed
           });
           
           currentPass++;
@@ -289,6 +324,16 @@ function createDiskpartScript(diskIndex, pass, content) {
   const scriptPath = path.join(os.tmpdir(), `diskpart_${diskIndex}_${pass}.txt`);
   fs.writeFileSync(scriptPath, content);
   return scriptPath;
+}
+
+async function getDriveSize(diskIndex) {
+  try {
+    const drives = await getDrives();
+    const drive = drives.find(d => d.diskIndex == diskIndex);
+    return drive ? drive.totalSize : 0;
+  } catch (error) {
+    return 0;
+  }
 }
 
 function createWipeScript(diskIndex, pass) {

@@ -102,12 +102,22 @@ function createDriveElement(drive) {
     const usedGB = Math.abs(drive.usedSpace / (1024**3)).toFixed(1);
     const fsInfo = drive.filesystems.join(', ');
     
+    // Estimate wipe time (conservative estimates)
+    const sizeBytes = drive.totalSize;
+    const estimatedSpeed = drive.model.toLowerCase().includes('ssd') ? 100 * 1024 * 1024 : 40 * 1024 * 1024; // bytes/sec (conservative)
+    const timePerPass = sizeBytes / estimatedSpeed; // seconds
+    const totalTime = timePerPass * 4; // 4 passes
+    const hours = Math.floor(totalTime / 3600);
+    const minutes = Math.floor((totalTime % 3600) / 60);
+    const timeEstimate = hours > 0 ? `~${hours}h ${minutes}m` : `~${minutes}m`;
+    
     div.innerHTML = `
         <input type="checkbox" class="drive-checkbox" data-drive="${drive.diskIndex}" ${drive.isSystemDisk ? 'disabled' : ''}>
         <div class="drive-info">
             <h3>${drive.drive}</h3>
             <p>${drive.model}</p>
             <p>${totalGB} GB (${freeGB} GB free) • ${fsInfo}</p>
+            <p class="time-estimate">Estimated wipe time: ${timeEstimate} (will update with real-time data)</p>
         </div>
     `;
     
@@ -179,7 +189,21 @@ function updateProgress(data) {
     const progressFill = document.getElementById('progressFill');
     const progressDetails = document.getElementById('progressDetails');
     
-    progressInfo.textContent = `Pass ${data.pass} of ${data.totalPasses} - ${data.progress}%`;
+    let timeInfo = '';
+    let speedInfo = '';
+    
+    if (data.writeSpeed) {
+        const speedMBs = (data.writeSpeed / (1024 * 1024)).toFixed(1);
+        speedInfo = ` - ${speedMBs} MB/s`;
+    }
+    
+    if (data.timeRemaining) {
+        const hours = Math.floor(data.timeRemaining / (1000 * 60 * 60));
+        const minutes = Math.floor((data.timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
+        timeInfo = hours > 0 ? ` - Time remaining: ~${hours}h ${minutes}m` : ` - Time remaining: ~${minutes}m`;
+    }
+    
+    progressInfo.textContent = `Pass ${data.pass} of ${data.totalPasses} - ${data.progress}%${speedInfo}${timeInfo}`;
     progressFill.style.width = `${data.progress}%`;
     
     let passDescription = '';
