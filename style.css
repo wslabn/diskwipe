@@ -247,3 +247,37 @@ body.dark .modal-content {
     color: #856404;
     font-size: 14px;
 }
+
+.update-status {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 8px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+body.dark .update-status {
+    background: #404040;
+    border-color: #555;
+    color: #ccc;
+}
+
+.update-available {
+    background: #d4edda !important;
+    border-color: #c3e6cb !important;
+    color: #155724 !important;
+}
+
+.update-error {
+    background: #f8d7da !important;
+    border-color: #f5c6cb !important;
+    color: #721c24 !important;
+}

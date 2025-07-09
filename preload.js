@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   wipeDrive: (drive, filesystem) => ipcRenderer.invoke('wipe-drive', drive, filesystem),
   showWarning: () => ipcRenderer.invoke('show-warning'),
   selectFilesystem: () => ipcRenderer.invoke('select-filesystem'),
-  onWipeProgress: (callback) => ipcRenderer.on('wipe-progress', callback)
+  onWipeProgress: (callback) => ipcRenderer.on('wipe-progress', callback),
+  onUpdateStatus: (callback) => ipcRenderer.on('update-status', callback)
 });

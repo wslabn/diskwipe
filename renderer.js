@@ -11,6 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
         updateProgress(data);
     });
     
+    window.electronAPI.onUpdateStatus((event, data) => {
+        updateUpdateStatus(data);
+    });
+    
     // Load theme: saved preference or system default
     const savedTheme = localStorage.getItem('darkMode');
     const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -34,6 +38,38 @@ function toggleTheme() {
         themeBtn.textContent = '🌙 Dark Mode';
         localStorage.setItem('darkMode', 'false');
     }
+}
+
+function updateUpdateStatus(data) {
+    const updateStatus = document.getElementById('updateStatus');
+    const updateIcon = document.getElementById('updateIcon');
+    const updateText = document.getElementById('updateText');
+    
+    // Remove existing status classes
+    updateStatus.classList.remove('update-available', 'update-error');
+    
+    switch(data.status) {
+        case 'checking':
+            updateIcon.textContent = '🔄';
+            break;
+        case 'available':
+            updateIcon.textContent = '⬇️';
+            updateStatus.classList.add('update-available');
+            break;
+        case 'downloading':
+            updateIcon.textContent = '📥';
+            updateStatus.classList.add('update-available');
+            break;
+        case 'current':
+            updateIcon.textContent = '✅';
+            break;
+        case 'error':
+            updateIcon.textContent = '❌';
+            updateStatus.classList.add('update-error');
+            break;
+    }
+    
+    updateText.textContent = data.message;
 }
 
 async function loadDrives() {

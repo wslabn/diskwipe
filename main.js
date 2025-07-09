@@ -51,6 +51,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  log('Application started, checking for updates...');
   autoUpdater.checkForUpdatesAndNotify();
 });
 
@@ -153,10 +154,10 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
       let cmd;
       if (currentPass < 3) {
         // Secure wipe passes - use diskpart clean all for complete wipe
-        cmd = `echo select disk ${drive} && echo clean all && echo exit | diskpart`;
+        cmd = `(echo select disk ${drive} & echo clean all & echo exit) | diskpart`;
       } else {
         // Final format with chosen filesystem
-        cmd = `echo select disk ${drive} && echo create partition primary && echo active && echo format fs=${filesystem.toLowerCase()} quick && echo assign && echo exit | diskpart`;
+        cmd = `(echo select disk ${drive} & echo create partition primary & echo active & echo format fs=${filesystem.toLowerCase()} quick & echo assign & echo exit) | diskpart`;
       }
       const process = spawn('cmd', ['/c', cmd], { shell: true });
       
@@ -235,7 +236,14 @@ ipcMain.handle('select-filesystem', async () => {
 });
 
 // Auto-updater events
-autoUpdater.on('update-available', () => {
+autoUpdater.on('checking-for-update', () => {
+  log('Checking for application updates...');
+  mainWindow.webContents.send('update-status', { status: 'checking', message: 'Checking for updates...' });
+});
+
+autoUpdater.on('update-available', (info) => {
+  log(`Update available: ${info.version}`);
+  mainWindow.webContents.send('update-status', { status: 'available', message: `Update available: v${info.version}` });
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update Available',
@@ -244,7 +252,18 @@ autoUpdater.on('update-available', () => {
   });
 });
 
-autoUpdater.on('update-downloaded', () => {
+autoUpdater.on('update-not-available', () => {
+  log('Application is up to date');
+  mainWindow.webContents.send('update-status', { status: 'current', message: 'Up to date' });
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  log(`Update download progress: ${Math.round(progressObj.percent)}%`);
+  mainWindow.webContents.send('update-status', { status: 'downloading', message: `Downloading: ${Math.round(progressObj.percent)}%` });
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  log(`Update downloaded: ${info.version}`);
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update Ready',
@@ -252,9 +271,17 @@ autoUpdater.on('update-downloaded', () => {
     buttons: ['Restart Now', 'Later']
   }).then((result) => {
     if (result.response === 0) {
+      log('User chose to restart and install update');
       autoUpdater.quitAndInstall();
+    } else {
+      log('User chose to install update later');
     }
   });
+});
+
+autoUpdater.on('error', (error) => {
+  log(`Auto-updater error: ${error.message}`);
+  mainWindow.webContents.send('update-status', { status: 'error', message: 'Update check failed' });
 });
 
 function createWipeScript(diskIndex, pass) {
