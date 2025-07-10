@@ -86,42 +86,71 @@ ipcMain.handle('get-drives', async () => {
     const partOutput = execSync('wmic logicaldisk get caption,filesystem,size,freespace', { encoding: 'utf8' });
     const partLines = partOutput.split('\n').filter(line => line.trim() && !line.includes('Caption'));
     
-    const allFilesystems = [];
-    let totalUsedSpace = 0;
-    let totalFreeSpace = 0;
+    // Get disk-to-partition mapping
+    const diskPartOutput = execSync('wmic partition get diskindex,size', { encoding: 'utf8' });
+    const diskPartLines = diskPartOutput.split('\n').filter(line => line.trim() && !line.includes('DiskIndex'));
     
+    // Parse partition data by drive letter
+    const partitionData = {};
     partLines.forEach(line => {
       const parts = line.trim().split(/\s+/);
-      if (parts.length >= 4) {
-        const filesystem = parts[1] || 'Unknown';
+      if (parts.length >= 3) {
+        const caption = parts[0]; // Drive letter like C:
+        const filesystem = parts[1] || 'Unformatted';
         const freeSpace = parseInt(parts[2]) || 0;
         const totalSize = parseInt(parts[3]) || 0;
         
-        allFilesystems.push(filesystem);
-        totalFreeSpace += freeSpace;
-        totalUsedSpace += (totalSize - freeSpace);
+        partitionData[caption] = {
+          filesystem,
+          freeSpace,
+          totalSize,
+          usedSpace: totalSize - freeSpace
+        };
       }
     });
-    
-    const uniqueFilesystems = [...new Set(allFilesystems)];
     
     return diskLines.map(line => {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 3) {
         const index = parts[0];
         const model = parts.slice(1, -1).join(' ');
-        const size = parseInt(parts[parts.length - 1]) || 0;
+        const diskSize = parseInt(parts[parts.length - 1]) || 0;
         
         const isSystemDisk = index === '0';
+        
+        // Get actual filesystems for this disk
+        const diskFilesystems = [];
+        let totalUsed = 0;
+        let totalFree = 0;
+        let hasPartitions = false;
+        
+        // Try to match partitions to this disk (simplified approach)
+        Object.values(partitionData).forEach(partition => {
+          if (partition.filesystem && partition.filesystem !== 'Unformatted') {
+            diskFilesystems.push(partition.filesystem);
+          }
+          totalUsed += partition.usedSpace;
+          totalFree += partition.freeSpace;
+          hasPartitions = true;
+        });
+        
+        // If no partition data, assume unpartitioned
+        if (!hasPartitions || diskFilesystems.length === 0) {
+          totalFree = diskSize;
+          totalUsed = 0;
+          diskFilesystems.push('Unpartitioned');
+        }
+        
+        const uniqueFilesystems = [...new Set(diskFilesystems)];
         
         return {
           drive: `Disk ${index}${isSystemDisk ? ' (System Disk)' : ''}`,
           model: model || 'Unknown',
-          totalSize: size,
-          usedSpace: size - totalFreeSpace,
-          freeSpace: totalFreeSpace,
+          totalSize: diskSize,
+          usedSpace: Math.max(0, totalUsed),
+          freeSpace: Math.max(0, diskSize - totalUsed),
           diskIndex: index,
-          filesystems: uniqueFilesystems.length > 0 ? uniqueFilesystems : ['Unknown'],
+          filesystems: uniqueFilesystems.length > 0 ? uniqueFilesystems : ['Unpartitioned'],
           isSystemDisk: isSystemDisk
         };
       }
