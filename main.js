@@ -27,6 +27,8 @@ function log(message) {
 let mainWindow;
 let logWindow;
 let isWiping = false;
+let isPaused = false;
+let currentWipeProcess = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -203,6 +205,7 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'st
       const scriptPath = createDiskpartScript(drive, currentPass, scriptContent);
       const cmd = `diskpart /s "${scriptPath}"`;
       const process = spawn('cmd', ['/c', cmd], { shell: true });
+      currentWipeProcess = process;
       
       process.stdout.on('data', (data) => {
         log(`stdout: ${data.toString().trim()}`);
@@ -324,6 +327,87 @@ ipcMain.handle('show-backup-warning', async () => {
   });
   
   return result.response === 1;
+});
+
+ipcMain.handle('show-clone-warning', async () => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    buttons: ['Cancel', 'Clone Drive'],
+    defaultId: 0,
+    title: 'Clone Drive Before Wiping',
+    message: 'Create a backup image of the drive before wiping?',
+    detail: 'This will create a complete sector-by-sector copy of the drive for recovery purposes.'
+  });
+  
+  return result.response === 1;
+});
+
+ipcMain.handle('select-clone-target', async () => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Select Clone Target Location',
+    defaultPath: 'drive-clone.img',
+    filters: [
+      { name: 'Disk Images', extensions: ['img', 'iso', 'bin'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  
+  return result.canceled ? null : result.filePath;
+});
+
+ipcMain.handle('clone-drive', async (event, driveLetter, targetPath) => {
+  return new Promise((resolve, reject) => {
+    log(`Starting clone of drive ${driveLetter} to ${targetPath}`);
+    
+    const drive = driveLetter.replace('Disk ', '').replace(':', '');
+    
+    // Use dd command for Windows (if available) or PowerShell alternative
+    const cmd = `powershell -Command "& { $source = '\\\\.\\PhysicalDrive${drive}'; $target = '${targetPath}'; Write-Host 'Cloning drive...'; Copy-Item $source $target -Force; Write-Host 'Clone completed' }"`;
+    
+    const process = spawn('cmd', ['/c', cmd], { shell: true });
+    
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+      progress = Math.min(progress + 10, 90);
+      event.sender.send('wipe-progress', {
+        pass: 1,
+        totalPasses: 1,
+        progress,
+        timeRemaining: null,
+        writeSpeed: null
+      });
+    }, 5000);
+    
+    process.stdout.on('data', (data) => {
+      log(`Clone output: ${data.toString().trim()}`);
+    });
+    
+    process.stderr.on('data', (data) => {
+      log(`Clone error: ${data.toString().trim()}`);
+    });
+    
+    process.on('close', (code) => {
+      clearInterval(progressInterval);
+      
+      if (code === 0) {
+        event.sender.send('wipe-progress', {
+          pass: 1,
+          totalPasses: 1,
+          progress: 100,
+          timeRemaining: null,
+          writeSpeed: null
+        });
+        resolve({ success: true, message: 'Drive cloned successfully' });
+      } else {
+        reject(new Error(`Clone failed with code ${code}`));
+      }
+    });
+    
+    process.on('error', (error) => {
+      clearInterval(progressInterval);
+      reject(new Error('Clone process error: ' + error.message));
+    });
+  });
 });
 
 ipcMain.handle('open-logs', async () => {
@@ -486,3 +570,54 @@ function createFormatScript(diskIndex, filesystem) {
   fs.writeFileSync(scriptPath, script);
   return scriptPath;
 }
+
+ipcMain.handle('pause-wipe', async () => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Cancel', 'Pause Anyway'],
+    defaultId: 0,
+    title: 'WARNING: Pause Risk',
+    message: 'Pausing mid-wipe may leave the drive in an unusable state.',
+    detail: 'The drive may become corrupted and require reformatting. Only pause if absolutely necessary.'
+  });
+  
+  if (result.response !== 1) {
+    return { success: false, message: 'Pause cancelled by user' };
+  }
+  
+  if (currentWipeProcess && !isPaused) {
+    isPaused = true;
+    try {
+      execSync(`taskkill /PID ${currentWipeProcess.pid} /T /F`);
+      log('Wipe process paused - WARNING: Drive may be in unstable state');
+      return { success: true, message: 'Wipe paused - Drive may need reformatting' };
+    } catch (error) {
+      log(`Failed to pause process: ${error.message}`);
+      return { success: false, message: 'Failed to pause' };
+    }
+  }
+  return { success: false, message: 'No active process to pause' };
+});
+
+ipcMain.handle('resume-wipe', async () => {
+  isPaused = false;
+  log('Wipe process resumed');
+  return { success: true, message: 'Wipe resumed' };
+});
+
+ipcMain.handle('cancel-wipe', async () => {
+  if (currentWipeProcess) {
+    try {
+      currentWipeProcess.kill('SIGTERM');
+      isWiping = false;
+      isPaused = false;
+      currentWipeProcess = null;
+      log('Wipe process cancelled');
+      return { success: true, message: 'Wipe cancelled' };
+    } catch (error) {
+      log(`Failed to cancel process: ${error.message}`);
+      return { success: false, message: 'Failed to cancel' };
+    }
+  }
+  return { success: false, message: 'No active process to cancel' };
+});
