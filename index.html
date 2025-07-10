@@ -2,52 +2,166 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>DiskWipe - Secure Drive Wiper</title>
+    <title>DiskWipe Pro - Advanced Secure Drive Wiper</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="theme-toggle">
-        <button id="themeBtn">🌙 Dark Mode</button>
+    <div class="header">
+        <div class="header-left">
+            <h1>🔒 DiskWipe Pro</h1>
+            <span class="version">v<span id="appVersion">1.3.0</span></span>
+        </div>
+        <div class="header-right">
+            <button id="themeBtn">🌙 Dark</button>
+            <button id="viewLogsBtn">📄 Logs</button>
+            <div id="updateStatus" class="update-status">
+                <span id="updateIcon">🔄</span>
+                <span id="updateText">Checking...</span>
+            </div>
+        </div>
     </div>
     
     <div class="container">
-        <h1>🔒 DiskWipe</h1>
-        <p class="subtitle">Secure Drive Wiping Utility</p>
-        <p class="version">v<span id="appVersion">1.2.3</span></p>
-        
-        <div class="warning-box">
-            ⚠️ <strong>WARNING:</strong> This tool will permanently destroy all data on selected drives.
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="drives">🖥️ Drives</button>
+            <button class="tab-btn" data-tab="methods">⚙️ Methods</button>
+            <button class="tab-btn" data-tab="schedule">⏰ Schedule</button>
+            <button class="tab-btn" data-tab="reports">📊 Reports</button>
+            <button class="tab-btn" data-tab="settings">⚙️ Settings</button>
         </div>
 
-        <div class="section">
-            <h2>Available Drives</h2>
-            <button id="refreshBtn">🔄 Refresh Drives</button>
-            <div id="driveList"></div>
-        </div>
-
-        <div class="section">
-            <button id="wipeBtn" disabled>🗑️ Wipe Selected Drives</button>
-        </div>
-
-        <div id="progressModal" class="modal hidden">
-            <div class="modal-content">
-                <h3>🔒 Secure Disk Wiping</h3>
-                <div id="progressInfo"></div>
-                <div class="progress-bar">
-                    <div id="progressFill"></div>
-                </div>
-                <div id="progressDetails"></div>
-                <div class="warning">⚠️ Do not power off or disconnect drives during this process</div>
+        <div class="tab-content active" id="drives-tab">
+            <div class="toolbar">
+                <button id="refreshBtn">🔄 Refresh</button>
+                <button id="smartBtn">🔍 SMART Data</button>
+                <select id="sortBy">
+                    <option value="index">Sort by Index</option>
+                    <option value="size">Sort by Size</option>
+                    <option value="model">Sort by Model</option>
+                </select>
+            </div>
+            
+            <div class="warning-box">
+                ⚠️ <strong>WARNING:</strong> This tool will permanently destroy all data on selected drives.
+            </div>
+            
+            <div id="driveList" class="drive-grid"></div>
+            
+            <div class="action-bar">
+                <button id="wipeBtn" disabled>🗑️ Start Secure Wipe</button>
+                <button id="pauseBtn" disabled>⏸️ Pause</button>
+                <button id="cloneBtn" disabled>📋 Clone First</button>
             </div>
         </div>
 
-        <div id="status" class="status"></div>
-        
-        <div id="updateStatus" class="update-status">
-            <span id="updateIcon">🔄</span>
-            <span id="updateText">Checking for updates...</span>
+        <div class="tab-content" id="methods-tab">
+            <h3>Wipe Methods</h3>
+            <div class="method-grid">
+                <div class="method-card active" data-method="standard">
+                    <h4>🔒 Standard (4-Pass)</h4>
+                    <p>3x secure overwrite + format</p>
+                    <span class="time-est">~2-6 hours</span>
+                </div>
+                <div class="method-card" data-method="dod">
+                    <h4>🛡️ DoD 5220.22-M</h4>
+                    <p>7-pass military standard</p>
+                    <span class="time-est">~4-12 hours</span>
+                </div>
+                <div class="method-card" data-method="gutmann">
+                    <h4>🔐 Gutmann (35-Pass)</h4>
+                    <p>Maximum security</p>
+                    <span class="time-est">~1-3 days</span>
+                </div>
+                <div class="method-card" data-method="random">
+                    <h4>🎲 Random (Custom)</h4>
+                    <p>1-10 random passes</p>
+                    <input type="number" id="randomPasses" min="1" max="10" value="3">
+                </div>
+            </div>
+            
+            <h3>Filesystem Options</h3>
+            <div class="filesystem-options">
+                <label><input type="radio" name="filesystem" value="NTFS" checked> NTFS (Windows)</label>
+                <label><input type="radio" name="filesystem" value="exFAT"> exFAT (Cross-platform)</label>
+                <label><input type="radio" name="filesystem" value="FAT32"> FAT32 (Legacy)</label>
+                <label><input type="radio" name="filesystem" value="none"> No Format (Wipe Only)</label>
+            </div>
+        </div>
+
+        <div class="tab-content" id="schedule-tab">
+            <h3>Scheduled Operations</h3>
+            <div class="schedule-form">
+                <label>Schedule Type:
+                    <select id="scheduleType">
+                        <option value="once">One Time</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                    </select>
+                </label>
+                <label>Date & Time:
+                    <input type="datetime-local" id="scheduleTime">
+                </label>
+                <button id="addScheduleBtn">➕ Add Schedule</button>
+            </div>
+            <div id="scheduleList" class="schedule-list"></div>
+        </div>
+
+        <div class="tab-content" id="reports-tab">
+            <h3>Wipe Reports & Certificates</h3>
+            <div class="report-actions">
+                <button id="generateReportBtn">📄 Generate Certificate</button>
+                <button id="exportLogsBtn">📤 Export Logs</button>
+                <button id="emailReportBtn">📧 Email Report</button>
+            </div>
+            <div id="reportList" class="report-list"></div>
+        </div>
+
+        <div class="tab-content" id="settings-tab">
+            <h3>Application Settings</h3>
+            <div class="settings-grid">
+                <div class="setting-group">
+                    <h4>🔊 Notifications</h4>
+                    <label><input type="checkbox" id="soundNotifications" checked> Sound alerts</label>
+                    <label><input type="checkbox" id="emailNotifications"> Email notifications</label>
+                    <input type="email" id="emailAddress" placeholder="your@email.com">
+                </div>
+                
+                <div class="setting-group">
+                    <h4>🌡️ Monitoring</h4>
+                    <label><input type="checkbox" id="tempMonitoring" checked> Temperature monitoring</label>
+                    <label>Max temperature: <input type="number" id="maxTemp" value="60">°C</label>
+                </div>
+                
+                <div class="setting-group">
+                    <h4>🔐 Security</h4>
+                    <label><input type="checkbox" id="verificationPass" checked> Verification pass</label>
+                    <label><input type="checkbox" id="requireBackupConfirm" checked> Require backup confirmation</label>
+                </div>
+            </div>
         </div>
     </div>
+
+    <div id="progressModal" class="modal hidden">
+        <div class="modal-content">
+            <h3 id="progressTitle">🔒 Secure Disk Wiping</h3>
+            <div id="progressInfo"></div>
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="progressFill"></div>
+                </div>
+                <div id="tempDisplay" class="temp-display">🌡️ --°C</div>
+            </div>
+            <div id="progressDetails"></div>
+            <div class="modal-actions">
+                <button id="pauseModalBtn">⏸️ Pause</button>
+                <button id="viewLogsModalBtn">📄 View Logs</button>
+                <button id="cancelBtn" class="danger">❌ Cancel</button>
+            </div>
+            <div class="warning">⚠️ Do not power off or disconnect drives during this process</div>
+        </div>
+    </div>
+
+    <div id="status" class="status"></div>
 
     <script src="renderer.js"></script>
 </body>

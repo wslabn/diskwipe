@@ -17,9 +17,15 @@ function log(message) {
   const logEntry = `[${timestamp}] ${message}\n`;
   console.log(message);
   fs.appendFileSync(logFile, logEntry);
+  
+  // Send log to any open log windows
+  if (logWindow && !logWindow.isDestroyed()) {
+    logWindow.webContents.send('new-log', { timestamp, message });
+  }
 }
 
 let mainWindow;
+let logWindow;
 let isWiping = false;
 
 function createWindow() {
@@ -125,14 +131,14 @@ ipcMain.handle('get-drives', async () => {
   }
 });
 
-// Secure wipe drive using cipher command
-ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem) => {
+// Secure wipe drive with advanced methods
+ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'standard') => {
   return new Promise((resolve, reject) => {
     log(`Received drive parameter: ${driveLetter}`);
     // Extract just the number from "Disk 7" format
     const drive = driveLetter.replace('Disk ', '').replace(':', '');
     log(`Processed drive parameter: ${drive}`);
-    const passes = 4; // 3 cipher passes + 1 format
+    const passes = getMethodPasses(method);
     let currentPass = 0;
     let passStartTime = Date.now();
     let totalStartTime = Date.now();
@@ -278,6 +284,91 @@ ipcMain.handle('select-filesystem', async () => {
   return filesystems[result.response];
 });
 
+ipcMain.handle('show-backup-warning', async () => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Cancel', 'I Have Backups - Proceed'],
+    defaultId: 0,
+    title: 'BACKUP CONFIRMATION REQUIRED',
+    message: 'Have you backed up all important data?',
+    detail: 'This is your final chance to ensure all important files are safely backed up before permanent destruction.'
+  });
+  
+  return result.response === 1;
+});
+
+ipcMain.handle('open-logs', async () => {
+  if (logWindow && !logWindow.isDestroyed()) {
+    logWindow.focus();
+    return;
+  }
+  
+  logWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    title: 'DiskWipe Logs',
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+  
+  // Create logs HTML content
+  const logsHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>DiskWipe Logs</title>
+      <style>
+        body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; padding: 10px; margin: 0; overflow: hidden; }
+        .log-container { height: calc(100vh - 20px); overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; word-wrap: break-word; }
+        .log-entry { margin-bottom: 2px; }
+        .timestamp { color: #888; }
+      </style>
+    </head>
+    <body>
+      <div class="log-container" id="logContainer"></div>
+      <script>
+        // Load existing logs
+        const logContainer = document.getElementById('logContainer');
+        
+        // Listen for new logs
+        window.electronAPI.onNewLog((event, data) => {
+          const logEntry = document.createElement('div');
+          logEntry.className = 'log-entry';
+          logEntry.innerHTML = \`<span class="timestamp">[\${data.timestamp}]</span> \${data.message}\`;
+          logContainer.appendChild(logEntry);
+          logContainer.scrollTop = logContainer.scrollHeight;
+        });
+        
+        // Load existing log file content
+        window.electronAPI.getLogContent().then(content => {
+          logContainer.textContent = content;
+          logContainer.scrollTop = logContainer.scrollHeight;
+        }).catch(() => {
+          logContainer.textContent = 'No logs available yet.';
+        });
+      </script>
+    </body>
+    </html>
+  `;
+  
+  logWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(logsHtml));
+});
+
+ipcMain.handle('get-log-content', async () => {
+  try {
+    if (fs.existsSync(logFile)) {
+      return fs.readFileSync(logFile, 'utf8');
+    }
+    return 'No logs available yet.';
+  } catch (error) {
+    return 'Error reading log file: ' + error.message;
+  }
+});
+
 // Auto-updater events
 autoUpdater.on('checking-for-update', () => {
   log('Checking for application updates...');
@@ -348,6 +439,16 @@ function createWipeScript(diskIndex, pass) {
   const script = `select disk ${diskIndex}\r\nclean\r\nexit\r\n`;
   fs.writeFileSync(scriptPath, script);
   return scriptPath;
+}
+
+function getMethodPasses(method) {
+  switch (method) {
+    case 'standard': return 4;
+    case 'dod': return 7;
+    case 'gutmann': return 35;
+    case 'random': return 4; // Default to 3 + format
+    default: return 4;
+  }
 }
 
 function createFormatScript(diskIndex, filesystem) {
