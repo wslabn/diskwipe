@@ -32,6 +32,7 @@ jobs:
       with:
         files: |
           dist/DiskWipe Setup *.exe
+          dist/DiskWipe *.exe
           dist/latest.yml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

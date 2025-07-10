@@ -1,6 +1,6 @@
 {
   "name": "diskwipe",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Secure disk wiping utility",
   "main": "main.js",
   "requestedExecutionLevel": "requireAdministrator",
@@ -32,7 +32,16 @@
     ],
     "win": {
       "requestedExecutionLevel": "requireAdministrator",
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
       "icon": "icon.png"
     },
     "nsis": {
@@ -42,6 +51,9 @@
       "allowToChangeInstallationDirectory": true,
       "oneClick": false,
       "perMachine": true
+    },
+    "portable": {
+      "requestedExecutionLevel": "requireAdministrator"
     },
     "publish": {
       "provider": "github",
