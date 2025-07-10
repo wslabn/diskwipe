@@ -1,6 +1,6 @@
 {
   "name": "diskwipe",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Secure disk wiping utility",
   "main": "main.js",
   "requestedExecutionLevel": "requireAdministrator",

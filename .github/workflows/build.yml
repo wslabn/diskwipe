@@ -31,8 +31,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/DiskWipe Setup *.exe
-          dist/DiskWipe *.exe
+          dist/*.exe
           dist/latest.yml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
