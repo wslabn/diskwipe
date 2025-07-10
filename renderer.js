@@ -251,6 +251,7 @@ async function startWipe() {
     
     showStatus('Starting secure wipe...', 'info');
     document.getElementById('progressModal').classList.remove('hidden');
+    document.getElementById('progressTitle').textContent = '🔒 Secure Disk Wiping';
     
     for (const drive of selectedDrives) {
         try {
@@ -291,24 +292,145 @@ function togglePause() {
 }
 
 function cancelWipe() {
-    if (confirm('Are you sure you want to cancel the wipe operation? This may leave the drive in an unusable state.')) {
+    const progressTitle = document.getElementById('progressTitle');
+    const isCloning = progressTitle && progressTitle.textContent.includes('Cloning');
+    
+    const message = isCloning 
+        ? 'Are you sure you want to cancel the clone operation? The partial image file will be incomplete.'
+        : 'Are you sure you want to cancel the wipe operation? This may leave the drive in an unusable state.';
+    
+    const statusMessage = isCloning 
+        ? 'Clone operation cancelled'
+        : 'Wipe operation cancelled';
+    
+    if (confirm(message)) {
         window.electronAPI.cancelWipe();
         document.getElementById('progressModal').classList.add('hidden');
-        showStatus('Wipe operation cancelled', 'error');
+        
+        // Reset pause state
+        isPaused = false;
+        const pauseBtn = document.getElementById('pauseBtn');
+        const pauseModalBtn = document.getElementById('pauseModalBtn');
+        pauseBtn.textContent = '⏸️ Pause';
+        pauseModalBtn.textContent = '⏸️ Pause';
+        
+        showStatus(statusMessage, 'error');
     }
 }
 
 async function cloneDrives() {
-    showStatus('Drive cloning feature coming soon!', 'info');
+    if (selectedDrives.size === 0) {
+        showStatus('Please select a drive first', 'error');
+        return;
+    }
+    
+    const confirmed = await window.electronAPI.showCloneWarning();
+    if (!confirmed) return;
+    
+    const targetPath = await window.electronAPI.selectCloneTarget();
+    if (!targetPath) return;
+    
+    showStatus('Starting drive cloning...', 'info');
+    document.getElementById('progressModal').classList.remove('hidden');
+    document.getElementById('progressTitle').textContent = '💾 Cloning Drive';
+    
+    for (const [index, drive] of Array.from(selectedDrives).entries()) {
+        try {
+            // Create unique filename for each drive
+            const driveTargetPath = targetPath.replace(/(\.\w+)$/, `-drive-${drive}$1`);
+            await window.electronAPI.cloneDrive(drive, driveTargetPath);
+            showStatus(`Drive ${drive} cloned to ${driveTargetPath}`, 'success');
+        } catch (error) {
+            showStatus(`Error cloning drive ${drive}: ${error.message}`, 'error');
+            break;
+        }
+    }
+    
+    setTimeout(() => {
+        document.getElementById('progressModal').classList.add('hidden');
+    }, 3000);
 }
 
 async function showSmartData() {
-    showStatus('SMART data viewer coming soon!', 'info');
+    if (selectedDrives.size === 0) {
+        showStatus('Please select a drive first', 'error');
+        return;
+    }
+    
+    try {
+        const smartData = await window.electronAPI.getSmartData(Array.from(selectedDrives)[0]);
+        showSmartModal(smartData);
+    } catch (error) {
+        showStatus('Error reading SMART data: ' + error.message, 'error');
+    }
+}
+
+function showSmartModal(smartData) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 800px;">
+            <h3>🔍 SMART Data Analysis</h3>
+            <div class="smart-overview">
+                <div class="smart-status ${smartData.overallHealth}">
+                    <h4>Overall Health: ${smartData.overallHealth.toUpperCase()}</h4>
+                    <p>Temperature: ${smartData.temperature}°C</p>
+                    <p>Power On Hours: ${smartData.powerOnHours}</p>
+                </div>
+            </div>
+            <div class="smart-details">
+                <table>
+                    <thead>
+                        <tr><th>Attribute</th><th>Value</th><th>Threshold</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                        ${smartData.attributes.map(attr => `
+                            <tr class="${attr.status}">
+                                <td>${attr.name}</td>
+                                <td>${attr.value}</td>
+                                <td>${attr.threshold}</td>
+                                <td>${attr.status}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button onclick="this.closest('.modal').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
 }
 
 function sortDrives(sortBy) {
-    // This would sort the drives in the UI
-    loadDrives(); // For now, just reload
+    const driveCards = Array.from(document.querySelectorAll('.drive-card'));
+    const driveList = document.getElementById('driveList');
+    
+    driveCards.sort((a, b) => {
+        switch (sortBy) {
+            case 'size':
+                const sizeA = parseFloat(a.querySelector('.drive-detail:nth-child(2) span:last-child').textContent);
+                const sizeB = parseFloat(b.querySelector('.drive-detail:nth-child(2) span:last-child').textContent);
+                return sizeB - sizeA; // Largest first
+                
+            case 'model':
+                const modelA = a.querySelector('.drive-detail:first-child span:last-child').textContent;
+                const modelB = b.querySelector('.drive-detail:first-child span:last-child').textContent;
+                return modelA.localeCompare(modelB);
+                
+            case 'index':
+            default:
+                const indexA = parseInt(a.querySelector('.drive-title').textContent.match(/\d+/)[0]);
+                const indexB = parseInt(b.querySelector('.drive-title').textContent.match(/\d+/)[0]);
+                return indexA - indexB; // Smallest first
+        }
+    });
+    
+    // Clear and re-append sorted cards
+    driveList.innerHTML = '';
+    driveCards.forEach(card => driveList.appendChild(card));
 }
 
 function updateProgress(data) {
@@ -344,10 +466,17 @@ function updateProgress(data) {
     tempDisplay.className = temp > 55 ? 'temp-display hot' : 'temp-display';
     
     let passDescription = '';
-    if (data.pass <= getMethodPasses(currentWipeMethod) - 1) {
-        passDescription = `Securely overwriting all data on the drive.<br>This pass removes all existing files and partitions.`;
+    const progressTitle = document.getElementById('progressTitle');
+    
+    if (progressTitle && progressTitle.textContent.includes('Cloning')) {
+        passDescription = `Creating sector-by-sector copy of the drive.<br>Original drive data is being preserved in the image file.`;
     } else {
-        passDescription = `Creating new partition and formatting with selected filesystem.<br>Drive will be ready for use after this step.`;
+        // This is a wipe operation
+        if (data.pass <= getMethodPasses(currentWipeMethod) - 1) {
+            passDescription = `Securely overwriting all data on the drive.<br>This pass removes all existing files and partitions.`;
+        } else {
+            passDescription = `Creating new partition and formatting with selected filesystem.<br>Drive will be ready for use after this step.`;
+        }
     }
     
     progressDetails.innerHTML = passDescription;
