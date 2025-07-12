@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFilesystem: () => ipcRenderer.invoke('select-filesystem'),
   openLogs: () => ipcRenderer.invoke('open-logs'),
   getLogContent: () => ipcRenderer.invoke('get-log-content'),
+  getVersion: () => ipcRenderer.invoke('get-version'),
   getSmartData: (drive) => ipcRenderer.invoke('get-smart-data', drive),
   generateCertificate: (selectedDrives) => ipcRenderer.invoke('generate-certificate', selectedDrives),
   exportLogs: () => ipcRenderer.invoke('export-logs'),

@@ -647,6 +647,10 @@ ipcMain.handle('get-log-content', async () => {
   }
 });
 
+ipcMain.handle('get-version', async () => {
+  return require('./package.json').version;
+});
+
 // Auto-updater events
 autoUpdater.on('checking-for-update', () => {
   log('Checking for application updates...');
@@ -957,13 +961,14 @@ ipcMain.handle('generate-certificate', async (event, selectedDrivesList, wipeMet
       }
     }));
     
+    const appVersion = require('./package.json').version;
     const certificate = `
 === DISKWIPE SECURE WIPE CERTIFICATE ===
 
 Date: ${new Date().toLocaleString()}
 Operator: ${os.userInfo().username}
 Computer: ${os.hostname()}
-Application: DiskWipe Pro v1.4.0
+Application: DiskWipe Pro v${appVersion}
 
 --- WIPE DETAILS ---
 Method: Multi-pass secure overwrite
@@ -1012,7 +1017,7 @@ Certificate ID: ${Math.random().toString(36).substr(2, 16).toUpperCase()}
 Date: ${new Date().toLocaleString()}
 Operator: ${os.userInfo().username}
 Computer: ${os.hostname()}
-Application: DiskWipe Pro v1.3.7
+Application: DiskWipe Pro v${appVersion}
 
 --- WIPE DETAILS ---
 Method: Multi-pass secure overwrite

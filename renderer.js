@@ -5,11 +5,19 @@ let wipeQueue = [];
 let scheduledWipes = [];
 let scheduleTimer = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initializeApp();
     setupEventListeners();
     loadSettings();
     loadDrives();
+    
+    // Load version dynamically
+    try {
+        const version = await window.electronAPI.getVersion();
+        document.getElementById('appVersion').textContent = version;
+    } catch (error) {
+        document.getElementById('appVersion').textContent = '1.4.1';
+    }
 });
 
 function initializeApp() {
