@@ -2,6 +2,8 @@ let selectedDrives = new Set();
 let currentWipeMethod = 'standard';
 let isPaused = false;
 let wipeQueue = [];
+let scheduledWipes = [];
+let scheduleTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
@@ -103,23 +105,50 @@ async function loadDrives() {
     const driveList = document.getElementById('driveList');
     const status = document.getElementById('status');
     
+    // Show loading state
+    driveList.innerHTML = `
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Scanning for drives...</p>
+        </div>
+    `;
+    
     try {
         const drives = await window.electronAPI.getDrives();
         driveList.innerHTML = '';
         
-        drives.forEach(drive => {
-            const driveElement = createDriveCard(drive);
-            driveList.appendChild(driveElement);
-        });
+        if (drives.length === 0) {
+            driveList.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">💽</div>
+                    <h3>No Drives Found</h3>
+                    <p>No additional drives detected for wiping.</p>
+                    <button onclick="loadDrives()" class="refresh-btn">🔄 Refresh</button>
+                </div>
+            `;
+        } else {
+            for (const drive of drives) {
+                const driveElement = await createDriveCard(drive);
+                driveList.appendChild(driveElement);
+            }
+        }
         
         showStatus(`Found ${drives.length} drive(s)`, 'success');
         updateActionButtons();
     } catch (error) {
+        driveList.innerHTML = `
+            <div class="error-state">
+                <div class="error-icon">⚠️</div>
+                <h3>Error Loading Drives</h3>
+                <p>${error.message}</p>
+                <button onclick="loadDrives()" class="retry-btn">🔄 Try Again</button>
+            </div>
+        `;
         showStatus('Error loading drives: ' + error.message, 'error');
     }
 }
 
-function createDriveCard(drive) {
+async function createDriveCard(drive) {
     const card = document.createElement('div');
     card.className = 'drive-card';
     if (drive.isSystemDisk) card.classList.add('system-disk');
@@ -135,8 +164,14 @@ function createDriveCard(drive) {
     const temp = Math.floor(Math.random() * 20) + 35; // 35-55°C
     const tempClass = temp > 50 ? 'hot' : '';
     
-    // Mock serial number
-    const serial = `SN${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    // Get real serial number
+    let serial = 'Unknown';
+    try {
+        const serialData = await window.electronAPI.getSmartData(drive.diskIndex);
+        serial = serialData.serialNumber || 'Unknown';
+    } catch {
+        serial = 'Unknown';
+    }
     
     card.innerHTML = `
         <div class="drive-header">
@@ -255,7 +290,8 @@ async function startWipe() {
     
     for (const drive of selectedDrives) {
         try {
-            await window.electronAPI.wipeDrive(drive, filesystem, currentWipeMethod);
+            const customPasses = currentWipeMethod === 'random' ? parseInt(document.getElementById('randomPasses')?.value) || 3 : null;
+            await window.electronAPI.wipeDrive(drive, filesystem, currentWipeMethod, customPasses);
             showStatus(`Drive ${drive} wiped successfully!`, 'success');
         } catch (error) {
             showStatus(`Error wiping drive ${drive}: ${error.message}`, 'error');
@@ -358,24 +394,28 @@ async function showSmartData() {
     }
     
     try {
-        const smartData = await window.electronAPI.getSmartData(Array.from(selectedDrives)[0]);
-        showSmartModal(smartData);
+        const allSmartData = [];
+        for (const drive of selectedDrives) {
+            const smartData = await window.electronAPI.getSmartData(drive);
+            allSmartData.push(smartData);
+        }
+        showSmartModal(allSmartData);
     } catch (error) {
         showStatus('Error reading SMART data: ' + error.message, 'error');
     }
 }
 
-function showSmartModal(smartData) {
+function showSmartModal(allSmartData) {
     const modal = document.createElement('div');
     modal.className = 'modal';
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width: 800px;">
-            <h3>🔍 SMART Data Analysis</h3>
+    
+    const driveCards = allSmartData.map(smartData => `
+        <div class="smart-drive-card">
+            <h4>📀 ${smartData.drive} - ${smartData.model}</h4>
             <div class="smart-overview">
                 <div class="smart-status ${smartData.overallHealth}">
-                    <h4>Overall Health: ${smartData.overallHealth.toUpperCase()}</h4>
-                    <p>Temperature: ${smartData.temperature}°C</p>
-                    <p>Power On Hours: ${smartData.powerOnHours}</p>
+                    <h5>Health: ${smartData.overallHealth.toUpperCase()}</h5>
+                    <p>🌡️ ${smartData.temperature}°C | ⏰ ${smartData.powerOnHours}h</p>
                 </div>
             </div>
             <div class="smart-details">
@@ -395,6 +435,13 @@ function showSmartModal(smartData) {
                     </tbody>
                 </table>
             </div>
+        </div>
+    `).join('');
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
+            <h3>🔍 SMART Data Analysis (${allSmartData.length} drives)</h3>
+            ${driveCards}
             <div class="modal-actions">
                 <button onclick="this.closest('.modal').remove()">Close</button>
             </div>
@@ -528,6 +575,17 @@ function updateUpdateStatus(data) {
             updateText.textContent = 'Error';
             updateStatus.classList.add('update-error');
             break;
+        case 'portable-available':
+            updateIcon.textContent = '⬇️';
+            updateText.textContent = data.message;
+            updateStatus.classList.add('update-available');
+            updateStatus.style.cursor = 'pointer';
+            updateStatus.onclick = () => {
+                if (data.downloadUrl) {
+                    window.open(data.downloadUrl, '_blank');
+                }
+            };
+            break;
     }
 }
 
@@ -540,27 +598,136 @@ function addSchedule() {
         return;
     }
     
+    if (selectedDrives.size === 0) {
+        showStatus('Please select drives to schedule', 'error');
+        return;
+    }
+    
+    const scheduleTime = new Date(time);
+    if (scheduleTime <= new Date()) {
+        showStatus('Schedule time must be in the future', 'error');
+        return;
+    }
+    
+    const scheduleId = Date.now();
+    const customPasses = currentWipeMethod === 'random' ? parseInt(document.getElementById('randomPasses')?.value) || 3 : null;
+    
+    const schedule = {
+        id: scheduleId,
+        type,
+        time: scheduleTime,
+        drives: Array.from(selectedDrives),
+        method: currentWipeMethod,
+        filesystem: getSelectedFilesystem(),
+        customPasses: customPasses
+    };
+    
+    scheduledWipes.push(schedule);
+    
     const scheduleList = document.getElementById('scheduleList');
     const scheduleItem = document.createElement('div');
     scheduleItem.className = 'schedule-item';
     scheduleItem.innerHTML = `
         <div class="schedule-info">
             <strong>${type.charAt(0).toUpperCase() + type.slice(1)} Wipe</strong>
-            <span>${new Date(time).toLocaleString()}</span>
+            <span>${scheduleTime.toLocaleString()}</span>
+            <small>Drives: ${schedule.drives.join(', ')} | Method: ${currentWipeMethod}</small>
         </div>
-        <button onclick="this.parentElement.remove()">❌</button>
+        <button onclick="removeSchedule(${scheduleId})">❌</button>
     `;
     
     scheduleList.appendChild(scheduleItem);
+    startScheduleTimer();
     showStatus('Schedule added successfully', 'success');
 }
 
+function removeSchedule(scheduleId) {
+    scheduledWipes = scheduledWipes.filter(s => s.id !== scheduleId);
+    document.querySelector(`[onclick="removeSchedule(${scheduleId})"]`).parentElement.remove();
+    if (scheduledWipes.length === 0 && scheduleTimer) {
+        clearInterval(scheduleTimer);
+        scheduleTimer = null;
+    }
+}
+
+function startScheduleTimer() {
+    if (scheduleTimer) return; // Already running
+    
+    scheduleTimer = setInterval(() => {
+        const now = new Date();
+        const dueSchedules = scheduledWipes.filter(s => s.time <= now);
+        
+        dueSchedules.forEach(async (schedule) => {
+            // Remove from scheduled list
+            removeSchedule(schedule.id);
+            
+            // Execute the wipe
+            showStatus(`Executing scheduled ${schedule.type} wipe...`, 'info');
+            
+            try {
+                selectedDrives = new Set(schedule.drives);
+                currentWipeMethod = schedule.method;
+                
+                document.getElementById('progressModal').classList.remove('hidden');
+                document.getElementById('progressTitle').textContent = '🔒 Scheduled Wipe';
+                
+                for (const drive of schedule.drives) {
+                    await window.electronAPI.wipeDrive(drive, schedule.filesystem, schedule.method, schedule.customPasses);
+                }
+                
+                showStatus('Scheduled wipe completed successfully', 'success');
+            } catch (error) {
+                showStatus('Scheduled wipe failed: ' + error.message, 'error');
+            } finally {
+                setTimeout(() => {
+                    document.getElementById('progressModal').classList.add('hidden');
+                }, 3000);
+            }
+        });
+        
+        if (scheduledWipes.length === 0) {
+            clearInterval(scheduleTimer);
+            scheduleTimer = null;
+        }
+    }, 60000); // Check every minute
+}
+
 async function generateReport() {
-    showStatus('Generating wipe certificate...', 'info');
-    // This would generate a PDF certificate
-    setTimeout(() => {
-        showStatus('Certificate generated successfully', 'success');
-    }, 2000);
+    try {
+        const certificateData = await window.electronAPI.generateCertificate();
+        showStatus(`Certificate saved to: ${certificateData.path}`, 'success');
+        
+        // Open certificate in new window for printing
+        const printWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes');
+        printWindow.document.write(`
+            <html>
+            <head>
+                <title>DiskWipe Certificate</title>
+                <style>
+                    body { font-family: 'Courier New', monospace; padding: 20px; line-height: 1.4; background: white; color: black; }
+                    .header { text-align: center; font-weight: bold; margin-bottom: 20px; }
+                    .section { margin: 15px 0; }
+                    .warning { color: red; font-weight: bold; }
+                    .print-buttons { text-align: center; margin: 20px 0; }
+                    .print-buttons button { margin: 0 10px; padding: 10px 20px; font-size: 14px; }
+                    @media print { .print-buttons { display: none; } body { margin: 0; padding: 15px; } }
+                </style>
+            </head>
+            <body>
+                <div class="print-buttons">
+                    <button onclick="window.print()">🖨️ Print Certificate</button>
+                    <button onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent)">📋 Copy Text</button>
+                    <button onclick="window.close()">❌ Close</button>
+                </div>
+                <pre>${certificateData.content}</pre>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.focus();
+    } catch (error) {
+        showStatus('Error generating certificate: ' + error.message, 'error');
+    }
 }
 
 async function exportLogs() {

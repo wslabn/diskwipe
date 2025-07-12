@@ -2,13 +2,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getDrives: () => ipcRenderer.invoke('get-drives'),
-  wipeDrive: (drive, filesystem) => ipcRenderer.invoke('wipe-drive', drive, filesystem),
+  wipeDrive: (drive, filesystem, method, customPasses) => ipcRenderer.invoke('wipe-drive', drive, filesystem, method, customPasses),
   showWarning: () => ipcRenderer.invoke('show-warning'),
   selectFilesystem: () => ipcRenderer.invoke('select-filesystem'),
   openLogs: () => ipcRenderer.invoke('open-logs'),
   getLogContent: () => ipcRenderer.invoke('get-log-content'),
   getSmartData: (drive) => ipcRenderer.invoke('get-smart-data', drive),
-  generateCertificate: () => ipcRenderer.invoke('generate-certificate'),
+  generateCertificate: (selectedDrives) => ipcRenderer.invoke('generate-certificate', selectedDrives),
   exportLogs: () => ipcRenderer.invoke('export-logs'),
   sendEmailReport: (email) => ipcRenderer.invoke('send-email-report', email),
   showBackupWarning: () => ipcRenderer.invoke('show-backup-warning'),

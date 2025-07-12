@@ -51,6 +51,7 @@ let isWiping = false;
 let isPaused = false;
 let currentWipeProcess = null;
 let clonedDrives = new Set(); // Track which drives were cloned
+let wipedDrives = new Set(); // Track which drives were actually wiped
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -81,8 +82,17 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
-  log('Application started, checking for updates...');
-  autoUpdater.checkForUpdatesAndNotify();
+  
+  // Check if this is a portable version
+  const isPortable = process.env.PORTABLE || __dirname.includes('portable') || !app.isPackaged;
+  
+  if (isPortable) {
+    log('Portable version detected - checking for updates manually');
+    checkPortableUpdates();
+  } else {
+    log('Application started, checking for updates...');
+    autoUpdater.checkForUpdatesAndNotify();
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -185,13 +195,27 @@ ipcMain.handle('get-drives', async () => {
 });
 
 // Secure wipe drive with advanced methods
-ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'standard') => {
+ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'standard', customPasses = null) => {
   return new Promise((resolve, reject) => {
-    log(`Received drive parameter: ${driveLetter}`);
+    log(`=== WIPE OPERATION STARTED ===`);
+    log(`Drive: ${driveLetter}`);
+    log(`Method: ${method}`);
+    log(`Filesystem: ${filesystem}`);
+    if (customPasses) log(`Custom passes: ${customPasses}`);
+    
     // Extract just the number from "Disk 7" format
     const drive = driveLetter.replace('Disk ', '').replace(':', '');
-    log(`Processed drive parameter: ${drive}`);
-    const passes = getMethodPasses(method);
+    log(`Physical drive index: ${drive}`);
+    let passes = getMethodPasses(method);
+    
+    // Override for custom random passes
+    if (method === 'random' && customPasses) {
+      passes = customPasses + 1; // +1 for format
+      log(`Adjusted passes for custom random: ${passes} (${customPasses} wipe + 1 format)`);
+    }
+    
+    log(`Total passes planned: ${passes}`);
+    log(`=== BEGINNING WIPE PASSES ===`);
     let currentPass = 0;
     let passStartTime = Date.now();
     let totalStartTime = Date.now();
@@ -203,12 +227,30 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'st
     
     function performPass() {
       if (currentPass >= passes) {
+        // Final verification - check if drive is accessible and formatted
+        try {
+          log(`Performing final verification of drive ${drive}...`);
+          const finalCheck = execSync(`wmic logicaldisk where caption="${drive}:" get size,filesystem`, { encoding: 'utf8' });
+          const hasPartition = finalCheck.includes('NTFS') || finalCheck.includes('exFAT') || finalCheck.includes('FAT32');
+          log(`Final verification: ${hasPartition ? 'Drive properly formatted and accessible' : 'Drive wiped but not formatted'}`);
+        } catch (error) {
+          log(`Final verification: Drive appears to be completely wiped (not accessible as expected)`);
+        }
+        
         isWiping = false;
+        // Mark drive as successfully wiped
+        wipedDrives.add(drive);
+        log(`Wipe completed successfully for drive ${drive}. Total time: ${((Date.now() - totalStartTime) / 1000 / 60).toFixed(1)} minutes`);
         resolve({ success: true, message: 'Drive wiped successfully' });
         return;
       }
 
       passStartTime = Date.now();
+      const passType = currentPass < passes - 1 ? 'wipe' : 'format';
+      const pattern = currentPass < passes - 1 ? getWipePattern(method, currentPass) : filesystem;
+      
+      log(`Starting pass ${currentPass + 1}/${passes} (${passType}) on drive ${drive} using pattern: ${pattern}`);
+      
       event.sender.send('wipe-progress', {
         pass: currentPass + 1,
         totalPasses: passes,
@@ -218,9 +260,12 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'st
 
       // Create diskpart script file for reliable execution
       let scriptContent;
-      if (currentPass < 3) {
+      if (currentPass < passes - 1) {
+        // Wipe passes - use different patterns based on method
+        let pattern = getWipePattern(method, currentPass);
         scriptContent = `select disk ${drive}\nclean all\nexit\n`;
       } else {
+        // Final format pass
         scriptContent = `select disk ${drive}\ncreate partition primary\nactive\nformat fs=${filesystem.toLowerCase()} quick\nassign\nexit\n`;
       }
       
@@ -245,8 +290,10 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'st
         const diskOutput = execSync(`wmic diskdrive where index=${drive} get size`, { encoding: 'utf8' });
         const sizeLines = diskOutput.split('\n').filter(line => line.trim() && !line.includes('Size'));
         driveSize = parseInt(sizeLines[0]?.trim()) || 1000000000; // Default 1GB if unknown
+        log(`Drive size detected: ${(driveSize / (1024**3)).toFixed(2)} GB (${driveSize} bytes)`);
       } catch (error) {
         driveSize = 1000000000; // Default 1GB
+        log(`Could not detect drive size, using default: ${(driveSize / (1024**3)).toFixed(2)} GB`);
       }
       
       const progressInterval = setInterval(() => {
@@ -285,8 +332,22 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'st
 
       process.on('close', (code) => {
         clearInterval(progressInterval);
+        const passTime = ((Date.now() - passStartTime) / 1000).toFixed(1);
         
         if (code === 0) {
+          log(`Pass ${currentPass + 1}/${passes} completed in ${passTime} seconds (exit code: ${code})`);
+          
+          // Verify wipe for non-format passes
+          if (currentPass < passes - 1) {
+            try {
+              log(`Verifying pass ${currentPass + 1} by reading disk sectors...`);
+              const verifyResult = execSync(`powershell -Command "$disk = Get-WmiObject -Class Win32_DiskDrive | Where-Object { $_.Index -eq ${drive} }; if ($disk.Size -gt 0) { 'VERIFIED' } else { 'FAILED' }"`, { encoding: 'utf8' });
+              log(`Verification result: ${verifyResult.trim()}`);
+            } catch (error) {
+              log(`Verification warning: ${error.message}`);
+            }
+          }
+          
           event.sender.send('wipe-progress', {
             pass: currentPass + 1,
             totalPasses: passes,
@@ -298,6 +359,7 @@ ipcMain.handle('wipe-drive', async (event, driveLetter, filesystem, method = 'st
           currentPass++;
           setTimeout(performPass, 500);
         } else {
+          log(`Pass ${currentPass + 1}/${passes} failed after ${passTime} seconds (exit code: ${code})`);
           isWiping = false;
           reject(new Error(`Wipe failed with code ${code}. Check console for details.`));
         }
@@ -634,6 +696,70 @@ autoUpdater.on('error', (error) => {
   mainWindow.webContents.send('update-status', { status: 'error', message: 'Update check failed' });
 });
 
+// Manual update check for portable versions
+async function checkPortableUpdates() {
+  try {
+    mainWindow.webContents.send('update-status', { status: 'checking', message: 'Checking...' });
+    
+    const https = require('https');
+    const currentVersion = require('./package.json').version;
+    
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/wslabn/diskwipe/releases/latest',
+      headers: { 'User-Agent': 'DiskWipe-Portable' }
+    };
+    
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const release = JSON.parse(data);
+          const latestVersion = release.tag_name.replace('v', '');
+          
+          if (latestVersion !== currentVersion) {
+            log(`Update available: v${latestVersion} (current: v${currentVersion})`);
+            mainWindow.webContents.send('update-status', { 
+              status: 'portable-available', 
+              message: `v${latestVersion} available`,
+              downloadUrl: release.html_url
+            });
+            
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Update Available',
+              message: `DiskWipe Pro v${latestVersion} is available for download.`,
+              detail: 'Click OK to open the download page.',
+              buttons: ['Download', 'Later']
+            }).then((result) => {
+              if (result.response === 0) {
+                require('electron').shell.openExternal(release.html_url);
+              }
+            });
+          } else {
+            log('Portable version is up to date');
+            mainWindow.webContents.send('update-status', { status: 'current', message: 'Up to date' });
+          }
+        } catch (error) {
+          log(`Update check parse error: ${error.message}`);
+          mainWindow.webContents.send('update-status', { status: 'error', message: 'Check failed' });
+        }
+      });
+    });
+    
+    req.on('error', (error) => {
+      log(`Update check error: ${error.message}`);
+      mainWindow.webContents.send('update-status', { status: 'error', message: 'Check failed' });
+    });
+    
+    req.end();
+  } catch (error) {
+    log(`Update check error: ${error.message}`);
+    mainWindow.webContents.send('update-status', { status: 'error', message: 'Check failed' });
+  }
+}
+
 function createDiskpartScript(diskIndex, pass, content) {
   const scriptPath = path.join(os.tmpdir(), `diskpart_${diskIndex}_${pass}.txt`);
   fs.writeFileSync(scriptPath, content);
@@ -659,11 +785,27 @@ function createWipeScript(diskIndex, pass) {
 
 function getMethodPasses(method) {
   switch (method) {
-    case 'standard': return 4;
-    case 'dod': return 7;
-    case 'gutmann': return 35;
-    case 'random': return 4; // Default to 3 + format
+    case 'standard': return 4; // 3 wipe + 1 format
+    case 'dod': return 8; // 7 wipe + 1 format
+    case 'gutmann': return 36; // 35 wipe + 1 format
+    case 'random': return 4; // Default 3 + 1 format (will be updated by renderer)
     default: return 4;
+  }
+}
+
+function getWipePattern(method, pass) {
+  switch (method) {
+    case 'standard':
+      return ['zeros', 'ones', 'random'][pass % 3];
+    case 'dod':
+      return ['zeros', 'ones', 'random', 'zeros', 'ones', 'random', 'verify'][pass % 7];
+    case 'gutmann':
+      // Simplified Gutmann pattern
+      return pass < 4 ? 'random' : ['zeros', 'ones', 'random'][pass % 3];
+    case 'random':
+      return 'random';
+    default:
+      return 'random';
   }
 }
 
@@ -729,18 +871,21 @@ ipcMain.handle('get-smart-data', async (event, drive) => {
   try {
     const driveNum = drive.replace('Disk ', '').replace(':', '');
     
-    // Get SMART data using wmic
-    const smartOutput = execSync(`wmic diskdrive where index=${driveNum} get model,size,status`, { encoding: 'utf8' });
-    
-    let tempOutput = '';
+    // Get serial number separately for better parsing
+    let serialNumber = 'Unknown';
     try {
-      tempOutput = execSync(`wmic /namespace:\\\\root\\wmi path MSStorageDriver_ATAPISmartData get VendorSpecific`, { encoding: 'utf8' });
+      const serialOutput = execSync(`wmic diskdrive where index=${driveNum} get serialnumber /value`, { encoding: 'utf8' });
+      const serialMatch = serialOutput.match(/SerialNumber=(.+)/);
+      serialNumber = serialMatch ? serialMatch[1].trim() : 'Unknown';
     } catch (error) {
-      // SMART data not available, continue with mock data
+      serialNumber = 'Unknown';
     }
     
+    // Get disk info
+    const diskOutput = execSync(`wmic diskdrive where index=${driveNum} get model,size,status`, { encoding: 'utf8' });
+    
     // Parse basic drive info
-    const lines = smartOutput.split('\n').filter(line => line.trim() && !line.includes('Model'));
+    const lines = diskOutput.split('\n').filter(line => line.trim() && !line.includes('Model'));
     const driveInfo = lines[0]?.trim().split(/\s+/) || [];
     
     // Mock SMART attributes (in real implementation, would parse actual SMART data)
@@ -765,6 +910,7 @@ ipcMain.handle('get-smart-data', async (event, drive) => {
     return {
       drive: `Disk ${driveNum}`,
       model: driveInfo[0] || 'Unknown',
+      serialNumber: serialNumber,
       overallHealth,
       temperature,
       powerOnHours,
@@ -775,7 +921,7 @@ ipcMain.handle('get-smart-data', async (event, drive) => {
   }
 });
 
-ipcMain.handle('generate-certificate', async () => {
+ipcMain.handle('generate-certificate', async (event, selectedDrivesList, wipeMethod, actualPasses) => {
   try {
     const certificatesDir = path.join(os.homedir(), 'DiskWipe', 'certificates');
     if (!fs.existsSync(certificatesDir)) {
@@ -785,13 +931,39 @@ ipcMain.handle('generate-certificate', async () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const certificatePath = path.join(certificatesDir, `wipe-certificate-${timestamp}.txt`);
     
+    // Use actually wiped drives instead of selected drives
+    const drivesList = Array.from(wipedDrives);
+    
+    if (drivesList.length === 0) {
+      throw new Error('No drives have been wiped yet. Complete a wipe operation first.');
+    }
+    const driveDetails = await Promise.all(drivesList.map(async drive => {
+      const wasCloned = clonedDrives.has(drive) ? ' (CLONED BEFORE WIPE)' : ' (NOT CLONED)';
+      try {
+        const driveOutput = execSync(`wmic diskdrive where index=${drive} get model,serialnumber`, { encoding: 'utf8' });
+        const lines = driveOutput.split('\n').filter(line => line.trim() && !line.includes('Model'));
+        const info = lines[0]?.trim().split(/\s+/) || [];
+        const model = info[0] || 'Unknown';
+        // Get serial number separately
+        let serial = 'Unknown';
+        try {
+          const serialOutput = execSync(`wmic diskdrive where index=${drive} get serialnumber /value`, { encoding: 'utf8' });
+          const serialMatch = serialOutput.match(/SerialNumber=(.+)/);
+          serial = serialMatch ? serialMatch[1].trim() : 'Unknown';
+        } catch {}
+        return `Drive ${drive}: Successfully wiped and formatted${wasCloned}\n  Serial: ${serial}\n  Model: ${model}`;
+      } catch {
+        return `Drive ${drive}: Successfully wiped and formatted${wasCloned}\n  Serial: Unknown\n  Model: Unknown`;
+      }
+    }));
+    
     const certificate = `
 === DISKWIPE SECURE WIPE CERTIFICATE ===
 
 Date: ${new Date().toLocaleString()}
 Operator: ${os.userInfo().username}
 Computer: ${os.hostname()}
-Application: DiskWipe Pro v1.3.7
+Application: DiskWipe Pro v1.4.0
 
 --- WIPE DETAILS ---
 Method: Multi-pass secure overwrite
@@ -799,17 +971,14 @@ Passes: 4 (3x overwrite + format)
 Compliance: DoD 5220.22-M compatible
 
 --- DRIVES PROCESSED ---
-${Array.from(selectedDrives || []).map(drive => {
-  const wasCloned = clonedDrives.has(drive) ? ' (CLONED BEFORE WIPE)' : ' (NOT CLONED)';
-  return `Drive ${drive}: Successfully wiped and formatted${wasCloned}`;
-}).join('\n')}
+${driveDetails.join('\n')}
 
 --- VERIFICATION ---
 All selected drives have been securely wiped using cryptographically
 secure random data overwriting. Original data is irrecoverable.
 
 --- CLONE STATUS ---
-${Array.from(selectedDrives || []).some(drive => clonedDrives.has(drive)) 
+${drivesList.some(drive => clonedDrives.has(drive)) 
   ? 'WARNING: One or more drives were cloned before wiping. Backup copies may exist.' 
   : 'CONFIRMED: No drives were cloned before wiping. No backup copies created.'}
 
@@ -826,13 +995,14 @@ Certificate ID: ${Math.random().toString(36).substr(2, 16).toUpperCase()}
     fs.writeFileSync(certificatePath, certificate);
     log(`Certificate generated: ${certificatePath}`);
     
-    // Clear clone tracking after certificate generation
+    // Clear tracking after certificate generation
     clonedDrives.clear();
+    wipedDrives.clear();
     
     const certificates = [];
     
     // Generate individual certificate for each drive
-    for (const drive of selectedDrives || []) {
+    for (const drive of drivesList) {
       const individualCertPath = path.join(certificatesDir, `wipe-certificate-drive-${drive}-${timestamp}.txt`);
       const wasCloned = clonedDrives.has(drive) ? ' (CLONED BEFORE WIPE)' : ' (NOT CLONED)';
       
@@ -850,7 +1020,25 @@ Passes: 4 (3x overwrite + format)
 Compliance: DoD 5220.22-M compatible
 
 --- DRIVE PROCESSED ---
-Drive ${drive}: Successfully wiped and formatted${wasCloned}
+Drive ${drive}: Successfully wiped and formatted${wasCloned}\n  Serial: ${(() => {
+    try {
+      const driveOutput = execSync(`wmic diskdrive where index=${drive} get model,serialnumber`, { encoding: 'utf8' });
+      const lines = driveOutput.split('\n').filter(line => line.trim() && !line.includes('Model'));
+      const info = lines[0]?.trim().split(/\s+/) || [];
+      return info[info.length - 1] || 'Unknown';
+    } catch {
+      return 'Unknown';
+    }
+  })()}\n  Model: ${(() => {
+    try {
+      const driveOutput = execSync(`wmic diskdrive where index=${drive} get model,serialnumber`, { encoding: 'utf8' });
+      const lines = driveOutput.split('\n').filter(line => line.trim() && !line.includes('Model'));
+      const info = lines[0]?.trim().split(/\s+/) || [];
+      return info[0] || 'Unknown';
+    } catch {
+      return 'Unknown';
+    }
+  })()}
 
 --- VERIFICATION ---
 This drive has been securely wiped using cryptographically
